@@ -463,20 +463,27 @@
 
   </div>
 
+
   <script>
     let currentUser = null;
     let currentGuildId = null;
+    let inviteUrl = null;
 
     async function init() {
-      const res = await fetch('/api/me');
-      const data = await res.json();
+      const [meRes, inviteRes] = await Promise.all([
+        fetch('/api/me'),
+        fetch('/api/invite')
+      ]);
+      const meData = await meRes.json();
+      const inviteData = await inviteRes.json();
+      inviteUrl = inviteData.url;
 
-      if (!data.user) {
+      if (!meData.user) {
         showLogin();
         return;
       }
 
-      currentUser = data.user;
+      currentUser = meData.user;
       showDashboard();
     }
 
@@ -497,6 +504,9 @@
 
       document.getElementById('header-right').innerHTML = `
         <div class="user-info">
+          <a href="${inviteUrl}" target="_blank" class="btn btn-primary" style="font-size:12px;padding:8px 14px;">
+            ➕ Bot einladen
+          </a>
           <img src="${avatarUrl}" class="avatar" alt="avatar" />
           <span class="username">${currentUser.username}</span>
           <a href="/auth/logout" class="btn btn-ghost">Logout</a>
@@ -506,13 +516,26 @@
       populateGuilds();
     }
 
-    function populateGuilds() {
-      const guilds = currentUser.adminGuilds;
+    async function populateGuilds() {
       const select = document.getElementById('guild-select');
+      select.innerHTML = '<option value="">Lädt Server...</option>';
+      select.disabled = true;
+
+      // Fetch only guilds where bot is present
+      const res = await fetch('/api/guilds');
+      const guilds = await res.json();
+
+      select.innerHTML = '<option value="">Server auswählen...</option>';
+      select.disabled = false;
 
       if (!guilds || guilds.length === 0) {
         select.closest('.card').style.display = 'none';
         document.getElementById('no-guilds-msg').style.display = 'block';
+        document.getElementById('no-guilds-msg').innerHTML = `
+          <div class="icon">🤖</div>
+          <p>Der Bot ist auf keinem deiner Server.<br/>
+          <a href="${inviteUrl}" target="_blank" style="color:var(--accent);">Bot jetzt einladen →</a></p>
+        `;
         return;
       }
 
@@ -541,12 +564,8 @@
       currentGuildId = guildId;
       channelCard.style.display = 'block';
       channelSelect.disabled = true;
-      channelSelect.innerHTML = `<option>
-        <span class="loading-dots"><span></span><span></span><span></span></span>
-        Loading channels...
-      </option>`;
+      channelSelect.innerHTML = '<option>Lädt Channels...</option>';
 
-      // Load channels and config in parallel
       const [channelsRes, configRes] = await Promise.all([
         fetch(`/api/channels/${guildId}`),
         fetch(`/api/config/${guildId}`)
@@ -555,7 +574,7 @@
       const channels = await channelsRes.json();
       const config = await configRes.json();
 
-      channelSelect.innerHTML = '<option value="">Select a channel...</option>';
+      channelSelect.innerHTML = '<option value="">Channel auswählen...</option>';
       channels.forEach(c => {
         const opt = document.createElement('option');
         opt.value = c.id;
@@ -570,7 +589,7 @@
         if (saved) {
           currentInfo.innerHTML = `
             <div class="current-channel">
-              <span>✓</span> Currently active in <strong>#${saved.name}</strong>
+              <span>✓</span> Aktuell aktiv in <strong>#${saved.name}</strong>
             </div>`;
         }
       }
@@ -582,7 +601,7 @@
 
       if (!currentGuildId || !channelId) {
         toast.className = 'toast error';
-        toast.textContent = '⚠ Please select a channel first.';
+        toast.textContent = '⚠ Bitte zuerst einen Channel auswählen.';
         return;
       }
 
@@ -598,19 +617,12 @@
       const data = await res.json();
       if (data.success) {
         toast.className = 'toast success';
-        toast.textContent = '✓ Configuration saved!';
-        // Refresh the current channel label
+        toast.textContent = '✓ Konfiguration gespeichert!';
         onGuildChange();
       } else {
         toast.className = 'toast error';
-        toast.textContent = '✗ Failed to save. Try again.';
+        toast.textContent = '✗ Fehler beim Speichern.';
       }
-    }
-
-    // Handle error params from OAuth redirect
-    const params = new URLSearchParams(location.search);
-    if (params.get('error')) {
-      console.warn('Auth error:', params.get('error'));
     }
 
     init();
