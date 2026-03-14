@@ -16,14 +16,12 @@ app.use(session({
   cookie: { secure: false, maxAge: 1000 * 60 * 60 * 24 }
 }));
 
-// ─── Auth Middleware ──────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
   next();
 }
 
-// ─── Internal Bot API (protected by API_SECRET) ──────────────────────────────
-// The bot on bothosting.net calls this to get the channel config
+// ─── Internal Bot API ─────────────────────────────────────────────────────────
 app.get('/internal/config/:guildId', (req, res) => {
   const secret = req.headers['x-api-secret'];
   if (secret !== process.env.API_SECRET) {
@@ -102,8 +100,26 @@ app.get('/api/me', (req, res) => {
   res.json({ user: { id, username, avatar, adminGuilds } });
 });
 
-app.get('/api/guilds', requireAuth, (req, res) => {
-  res.json(req.session.user.adminGuilds);
+// Only return guilds where the bot is also a member
+app.get('/api/guilds', requireAuth, async (req, res) => {
+  try {
+    const botGuildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
+      headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+    });
+    const botGuilds = await botGuildsRes.json();
+    const botGuildIds = new Set(botGuilds.map(g => g.id));
+    const filtered = req.session.user.adminGuilds.filter(g => botGuildIds.has(g.id));
+    res.json(filtered);
+  } catch (err) {
+    console.error('[API] Failed to fetch bot guilds:', err);
+    res.json(req.session.user.adminGuilds);
+  }
+});
+
+// Bot invite URL
+app.get('/api/invite', (req, res) => {
+  const url = `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&permissions=274877908992&scope=bot`;
+  res.json({ url });
 });
 
 app.get('/api/channels/:guildId', requireAuth, async (req, res) => {
@@ -147,7 +163,6 @@ app.post('/api/config', requireAuth, (req, res) => {
   }
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`[Server] Running on port ${PORT}`);
