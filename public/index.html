@@ -392,6 +392,84 @@
       margin: 24px 0;
     }
 
+
+    .toggle-group {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 4px;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .toggle-label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .toggle-label strong {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .toggle-label span {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 100px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 3px;
+      top: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .toggle input:checked + .toggle-slider {
+      background: var(--accent);
+    }
+
+    .toggle input:checked + .toggle-slider::before {
+      transform: translateX(20px);
+    }
+
     /* ── Responsive ── */
     @media (max-width: 600px) {
       header { padding: 16px 20px; }
@@ -451,6 +529,46 @@
           <div class="save-row">
             <button class="btn btn-primary" onclick="saveConfig()">Save Configuration</button>
             <div class="toast" id="save-toast"></div>
+          </div>
+        </div>
+
+        <div class="card" id="filter-card" style="display:none">
+          <div class="card-label">03 — Content Filter</div>
+          <div class="toggle-group">
+            <div class="toggle-row">
+              <div class="toggle-label">
+                <strong>🔞 NSFW / Explicit Content</strong>
+                <span>Removes sexual or explicit messages</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="filter-nsfw" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-label">
+                <strong>🚫 Hate Speech & Insults</strong>
+                <span>Removes discrimination and offensive messages</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="filter-hate" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-label">
+                <strong>⚠️ Spam & Nonsense</strong>
+                <span>Removes spam and meaningless messages</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="filter-spam" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="save-row" style="margin-top:16px;">
+            <button class="btn btn-primary" onclick="saveFilters()">Save Filters</button>
+            <div class="toast" id="filter-toast"></div>
           </div>
         </div>
 
@@ -550,6 +668,7 @@
     async function onGuildChange() {
       const guildId = document.getElementById('guild-select').value;
       const channelCard = document.getElementById('channel-card');
+      const filterCard = document.getElementById('filter-card');
       const channelSelect = document.getElementById('channel-select');
       const currentInfo = document.getElementById('current-channel-info');
 
@@ -558,6 +677,7 @@
 
       if (!guildId) {
         channelCard.style.display = 'none';
+        filterCard.style.display = 'none';
         return;
       }
 
@@ -566,13 +686,15 @@
       channelSelect.disabled = true;
       channelSelect.innerHTML = '<option>Lädt Channels...</option>';
 
-      const [channelsRes, configRes] = await Promise.all([
+      const [channelsRes, configRes, filtersRes] = await Promise.all([
         fetch(`/api/channels/${guildId}`),
-        fetch(`/api/config/${guildId}`)
+        fetch(`/api/config/${guildId}`),
+        fetch(`/api/filters/${guildId}`)
       ]);
 
       const channels = await channelsRes.json();
       const config = await configRes.json();
+      const filters = await filtersRes.json();
 
       channelSelect.innerHTML = '<option value="">Channel auswählen...</option>';
       channels.forEach(c => {
@@ -592,6 +714,36 @@
               <span>✓</span> Aktuell aktiv in <strong>#${saved.name}</strong>
             </div>`;
         }
+      }
+
+      // Load filter states
+      document.getElementById('filter-nsfw').checked = filters.filter_nsfw !== false;
+      document.getElementById('filter-hate').checked = filters.filter_hate !== false;
+      document.getElementById('filter-spam').checked = filters.filter_spam !== false;
+      filterCard.style.display = 'block';
+    }
+
+    async function saveFilters() {
+      const toast = document.getElementById('filter-toast');
+      if (!currentGuildId) return;
+
+      const res = await fetch('/api/filters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guildId: currentGuildId,
+          filter_nsfw: document.getElementById('filter-nsfw').checked,
+          filter_hate: document.getElementById('filter-hate').checked,
+          filter_spam: document.getElementById('filter-spam').checked,
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.className = 'toast success';
+        toast.textContent = '✓ Filter gespeichert!';
+      } else {
+        toast.className = 'toast error';
+        toast.textContent = '✗ Fehler beim Speichern.';
       }
     }
 
