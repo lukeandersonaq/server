@@ -24,11 +24,20 @@ function requireAuth(req, res, next) {
 // ─── Internal Bot API ─────────────────────────────────────────────────────────
 app.get('/internal/config/:guildId', (req, res) => {
   const secret = req.headers['x-api-secret'];
-  if (secret !== process.env.API_SECRET) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  if (secret !== process.env.API_SECRET) return res.status(403).json({ error: 'Forbidden' });
   const config = db.getConfig(req.params.guildId);
   res.json(config || { guild_id: req.params.guildId, channel_id: null });
+});
+
+app.get('/internal/filters/:guildId', (req, res) => {
+  const secret = req.headers['x-api-secret'];
+  if (secret !== process.env.API_SECRET) return res.status(403).json({ error: 'Forbidden' });
+  const filters = db.getFilters(req.params.guildId);
+  res.json({
+    filter_nsfw: filters.filter_nsfw === 1,
+    filter_hate: filters.filter_hate === 1,
+    filter_spam: filters.filter_spam === 1,
+  });
 });
 
 // ─── Auth Routes ─────────────────────────────────────────────────────────────
@@ -45,7 +54,6 @@ app.get('/auth/discord', (req, res) => {
 app.get('/auth/discord/callback', async (req, res) => {
   const { code } = req.query;
   if (!code) return res.redirect('/?error=no_code');
-
   try {
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
@@ -70,10 +78,7 @@ app.get('/auth/discord/callback', async (req, res) => {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const guilds = await guildsRes.json();
-
-    const adminGuilds = guilds.filter(g =>
-      (BigInt(g.permissions) & BigInt(0x8)) === BigInt(0x8)
-    );
+    const adminGuilds = guilds.filter(g => (BigInt(g.permissions) & BigInt(0x8)) === BigInt(0x8));
 
     req.session.user = {
       id: user.id,
@@ -81,7 +86,6 @@ app.get('/auth/discord/callback', async (req, res) => {
       avatar: user.avatar,
       adminGuilds: adminGuilds.map(g => ({ id: g.id, name: g.name, icon: g.icon }))
     };
-
     res.redirect('/');
   } catch (err) {
     console.error('[Auth] OAuth error:', err);
@@ -100,7 +104,6 @@ app.get('/api/me', (req, res) => {
   res.json({ user: { id, username, avatar, adminGuilds } });
 });
 
-// Only return guilds where the bot is also a member
 app.get('/api/guilds', requireAuth, async (req, res) => {
   try {
     const botGuildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
@@ -111,12 +114,10 @@ app.get('/api/guilds', requireAuth, async (req, res) => {
     const filtered = req.session.user.adminGuilds.filter(g => botGuildIds.has(g.id));
     res.json(filtered);
   } catch (err) {
-    console.error('[API] Failed to fetch bot guilds:', err);
     res.json(req.session.user.adminGuilds);
   }
 });
 
-// Bot invite URL
 app.get('/api/invite', (req, res) => {
   const url = `https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&permissions=274877908992&scope=bot`;
   res.json({ url });
@@ -126,7 +127,6 @@ app.get('/api/channels/:guildId', requireAuth, async (req, res) => {
   const { guildId } = req.params;
   const isAdmin = req.session.user.adminGuilds.some(g => g.id === guildId);
   if (!isAdmin) return res.status(403).json({ error: 'Forbidden' });
-
   try {
     const channelsRes = await fetch(`https://discord.com/api/guilds/${guildId}/channels`, {
       headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
@@ -160,6 +160,31 @@ app.post('/api/config', requireAuth, (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save' });
+  }
+});
+
+app.get('/api/filters/:guildId', requireAuth, (req, res) => {
+  const { guildId } = req.params;
+  const isAdmin = req.session.user.adminGuilds.some(g => g.id === guildId);
+  if (!isAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const filters = db.getFilters(guildId);
+  res.json({
+    filter_nsfw: filters.filter_nsfw === 1,
+    filter_hate: filters.filter_hate === 1,
+    filter_spam: filters.filter_spam === 1,
+  });
+});
+
+app.post('/api/filters', requireAuth, (req, res) => {
+  const { guildId, filter_nsfw, filter_hate, filter_spam } = req.body;
+  if (!guildId) return res.status(400).json({ error: 'Missing guildId' });
+  const isAdmin = req.session.user.adminGuilds.some(g => g.id === guildId);
+  if (!isAdmin) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    db.setFilters(guildId, filter_nsfw, filter_hate, filter_spam);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save filters' });
   }
 });
 
